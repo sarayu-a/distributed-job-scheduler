@@ -6,6 +6,9 @@ import subprocess
 
 from concurrent.futures import ThreadPoolExecutor
 
+from fastapi import FastAPI
+import uvicorn
+
 from scheduler.queue import wait_for_signal
 
 from scheduler.database import (
@@ -38,6 +41,24 @@ CAPACITY = int(
     os.getenv("WORKER_CAPACITY", "2")
 )
 
+app = FastAPI()
+
+
+@app.get("/")
+def health():
+    return {
+        "status": "worker running",
+        "worker_id": WORKER_ID
+    }
+
+
+@app.get("/health")
+def worker_health():
+    return {
+        "status": "healthy",
+        "worker_id": WORKER_ID
+    }
+
 
 def heartbeat_loop():
 
@@ -47,10 +68,7 @@ def heartbeat_loop():
             heartbeat(WORKER_ID)
 
         except Exception as e:
-            print(
-                "Heartbeat error:",
-                e
-            )
+            print("Heartbeat error:", e)
 
         time.sleep(5)
 
@@ -86,7 +104,6 @@ def execute_job(job):
             time.sleep(0.5)
             elapsed += 0.5
 
-            # Check whether the user cancelled the job.
             status = get_job_status(job.id)
 
             if status == "CANCELLED":
@@ -99,15 +116,12 @@ def execute_job(job):
                 process.terminate()
 
                 try:
-                    process.wait(
-                        timeout=3
-                    )
+                    process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     process.kill()
 
                 return
 
-            # Timeout handling.
             if (
                 timeout is not None
                 and elapsed >= timeout
@@ -135,27 +149,21 @@ def execute_job(job):
 
         duration = time.time() - start
 
-        job_duration.observe(
-            duration
-        )
+        job_duration.observe(duration)
 
         if stdout:
-            print(
-                stdout.strip()
-            )
+            print(stdout.strip())
 
         if stderr:
-            print(
-                stderr.strip()
-            )
+            print(stderr.strip())
 
-        # Cancellation may have happened just
-        # before process completion.
         if get_job_status(job.id) == "CANCELLED":
+
             print(
                 f"[{WORKER_ID}] "
                 f"Job cancelled: {job.id}"
             )
+
             return
 
         if process.returncode == 0:
@@ -169,8 +177,8 @@ def execute_job(job):
             jobs_completed.inc()
 
             print(
-                f"[{WORKER_ID}] Completed "
-                f"{job.id}"
+                f"[{WORKER_ID}] "
+                f"Completed {job.id}"
             )
 
         else:
@@ -192,8 +200,9 @@ def execute_job(job):
                 jobs_retried.inc()
 
                 print(
-                    f"[{WORKER_ID}] Retry "
-                    f"{job.id} in {delay}s"
+                    f"[{WORKER_ID}] "
+                    f"Retry {job.id} "
+                    f"in {delay}s"
                 )
 
             else:
@@ -209,8 +218,8 @@ def execute_job(job):
                 jobs_failed.inc()
 
                 print(
-                    f"[{WORKER_ID}] Failed "
-                    f"{job.id}"
+                    f"[{WORKER_ID}] "
+                    f"Failed {job.id}"
                 )
 
     except Exception as e:
@@ -260,15 +269,11 @@ def run_worker():
 
         while True:
 
-            wait_for_signal(
-                timeout=2
-            )
+            wait_for_signal(timeout=2)
 
             while True:
 
-                job = claim_job(
-                    WORKER_ID
-                )
+                job = claim_job(WORKER_ID)
 
                 if not job:
                     break
@@ -280,4 +285,20 @@ def run_worker():
 
 
 if __name__ == "__main__":
-    run_worker()
+
+    worker_thread = threading.Thread(
+        target=run_worker,
+        daemon=True,
+    )
+
+    worker_thread.start()
+
+    port = int(
+        os.getenv("PORT", "10000")
+    )
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+    )
