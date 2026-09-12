@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Distributed Job Scheduler</title>
+    <meta charset="UTF-8">
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        header {
+            background: #020617;
+            color: white;
+            padding: 25px 35px;
+            border-bottom: 1px solid #1e293b;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        header p {
+            margin: 8px 0 0;
+            color: #94a3b8;
+        }
+
+        .container {
+            padding: 30px 35px;
+        }
+
+        .cards {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 22px;
+            border-radius: 12px;
+            min-width: 160px;
+            flex: 1;
+            border: 1px solid #334155;
+        }
+
+        .card-title {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #f8fafc;
+        }
+
+        h2 {
+            margin-top: 35px;
+            color: #f8fafc;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e293b;
+            margin-top: 20px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }
+
+        th,
+        td {
+            padding: 14px;
+            border-bottom: 1px solid #334155;
+            text-align: left;
+        }
+
+        th {
+            background: #0f172a;
+            color: #94a3b8;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+
+        td {
+            color: #cbd5e1;
+        }
+
+        tr:hover {
+            background: #263449;
+        }
+
+        button {
+            background: #dc2626;
+            color: white;
+            border: none;
+            padding: 7px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #b91c1c;
+        }
+
+        .QUEUED {
+            color: #facc15;
+            font-weight: bold;
+        }
+
+        .RUNNING {
+            color: #60a5fa;
+            font-weight: bold;
+        }
+
+        .COMPLETED {
+            color: #4ade80;
+            font-weight: bold;
+        }
+
+        .FAILED,
+        .TIMEOUT {
+            color: #f87171;
+            font-weight: bold;
+        }
+
+        .CANCELLED {
+            color: #94a3b8;
+            font-weight: bold;
+        }
+
+        .ACTIVE {
+            color: #4ade80;
+            font-weight: bold;
+        }
+
+        .DEAD {
+            color: #f87171;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>Distributed Job Scheduler</h1>
+    <p>PostgreSQL + Redis + Distributed Workers</p>
+</header>
+
+<div class="container">
+
+    <div class="cards">
+
+        <div class="card">
+            <div class="card-title">TOTAL JOBS</div>
+            <div id="total" class="number">0</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">QUEUED</div>
+            <div id="queued" class="number">0</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">RUNNING</div>
+            <div id="running" class="number">0</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">COMPLETED</div>
+            <div id="completed" class="number">0</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">FAILED</div>
+            <div id="failed" class="number">0</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">ACTIVE WORKERS</div>
+            <div id="workers" class="number">0</div>
+        </div>
+
+    </div>
+
+    <h2>Jobs</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Worker</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+
+        <tbody id="jobs"></tbody>
+    </table>
+
+    <h2>Workers</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>Capacity</th>
+                <th>Active Jobs</th>
+                <th>Heartbeat</th>
+            </tr>
+        </thead>
+
+        <tbody id="workerTable"></tbody>
+    </table>
+
+</div>
+
+<script>
+
+async function loadData() {
+
+    const jobsResponse = await fetch("/jobs");
+    const jobs = await jobsResponse.json();
+
+    const workersResponse = await fetch("/workers");
+    const workers = await workersResponse.json();
+
+    const activeWorkers =
+        workers.filter(w => w.status === "ACTIVE");
+
+    document.getElementById("total").innerText =
+        jobs.length;
+
+    document.getElementById("queued").innerText =
+        jobs.filter(j => j.status === "QUEUED").length;
+
+    document.getElementById("running").innerText =
+        jobs.filter(j => j.status === "RUNNING").length;
+
+    document.getElementById("completed").innerText =
+        jobs.filter(j => j.status === "COMPLETED").length;
+
+    document.getElementById("failed").innerText =
+        jobs.filter(j => j.status === "FAILED").length;
+
+    document.getElementById("workers").innerText =
+        activeWorkers.length;
+
+
+    const jobTable =
+        document.getElementById("jobs");
+
+    jobTable.innerHTML = "";
+
+
+    jobs.forEach(job => {
+
+        const row =
+            document.createElement("tr");
+
+        row.innerHTML = `
+            <td>${job.id.substring(0, 8)}</td>
+
+            <td>${job.name}</td>
+
+            <td>${job.priority}</td>
+
+            <td class="${job.status}">
+                ${job.status}
+            </td>
+
+            <td>
+                ${job.retries}/${job.max_retries}
+            </td>
+
+            <td>
+                ${
+                    job.worker_id
+                        ? job.worker_id.substring(0, 8)
+                        : "-"
+                }
+            </td>
+
+            <td>
+                ${
+                    ["QUEUED", "RUNNING"].includes(job.status)
+                    ?
+                    `<button onclick="cancelJob('${job.id}')">
+                        Cancel
+                    </button>`
+                    :
+                    "-"
+                }
+            </td>
+        `;
+
+        jobTable.appendChild(row);
+
+    });
+
+
+    const workerTable =
+        document.getElementById("workerTable");
+
+    workerTable.innerHTML = "";
+
+
+    workers.forEach(worker => {
+
+        const row =
+            document.createElement("tr");
+
+        row.innerHTML = `
+            <td>
+                ${worker.id.substring(0, 8)}
+            </td>
+
+            <td class="${worker.status}">
+                ${worker.status}
+            </td>
+
+            <td>
+                ${worker.capacity}
+            </td>
+
+            <td>
+                ${worker.active_jobs}
+            </td>
+
+            <td>
+                ${worker.last_heartbeat}
+            </td>
+        `;
+
+        workerTable.appendChild(row);
+
+    });
+
+}
+
+
+async function cancelJob(id) {
+
+    await fetch(
+        `/jobs/${id}`,
+        {
+            method: "DELETE"
+        }
+    );
+
+    loadData();
+
+}
+
+
+loadData();
+
+setInterval(
+    loadData,
+    2000
+);
+
+</script>
+
+</body>
+</html>
