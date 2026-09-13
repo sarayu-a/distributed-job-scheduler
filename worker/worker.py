@@ -41,11 +41,12 @@ CAPACITY = int(
     os.getenv("WORKER_CAPACITY", "2")
 )
 
+
 app = FastAPI()
 
 
 @app.get("/")
-def health():
+def home():
     return {
         "status": "worker running",
         "worker_id": WORKER_ID
@@ -53,7 +54,7 @@ def health():
 
 
 @app.get("/health")
-def worker_health():
+def health():
     return {
         "status": "healthy",
         "worker_id": WORKER_ID
@@ -224,19 +225,26 @@ def execute_job(job):
 
     except Exception as e:
 
-        finish_job(
-            job.id,
-            WORKER_ID,
-            "FAILED",
-            str(e),
-        )
-
-        jobs_failed.inc()
-
         print(
             f"[{WORKER_ID}] Error:",
             e,
         )
+
+        try:
+            finish_job(
+                job.id,
+                WORKER_ID,
+                "FAILED",
+                str(e),
+            )
+
+            jobs_failed.inc()
+
+        except Exception as db_error:
+            print(
+                "Database error:",
+                db_error
+            )
 
     finally:
 
@@ -245,43 +253,55 @@ def execute_job(job):
 
 def run_worker():
 
-    register_worker(
-        WORKER_ID,
-        CAPACITY,
-    )
+    try:
 
-    threading.Thread(
-        target=heartbeat_loop,
-        daemon=True,
-    ).start()
+        register_worker(
+            WORKER_ID,
+            CAPACITY,
+        )
 
-    print(
-        f"Worker started: {WORKER_ID}"
-    )
+        print(
+            f"Worker started: {WORKER_ID}"
+        )
 
-    print(
-        f"Capacity: {CAPACITY}"
-    )
+        print(
+            f"Capacity: {CAPACITY}"
+        )
 
-    with ThreadPoolExecutor(
-        max_workers=CAPACITY
-    ) as executor:
+        threading.Thread(
+            target=heartbeat_loop,
+            daemon=True,
+        ).start()
 
-        while True:
-
-            wait_for_signal(timeout=2)
+        with ThreadPoolExecutor(
+            max_workers=CAPACITY
+        ) as executor:
 
             while True:
 
-                job = claim_job(WORKER_ID)
-
-                if not job:
-                    break
-
-                executor.submit(
-                    execute_job,
-                    job,
+                wait_for_signal(
+                    timeout=2
                 )
+
+                while True:
+
+                    job = claim_job(
+                        WORKER_ID
+                    )
+
+                    if not job:
+                        break
+
+                    executor.submit(
+                        execute_job,
+                        job,
+                    )
+
+    except Exception as e:
+
+        print(
+            f"Worker startup error: {e}"
+        )
 
 
 if __name__ == "__main__":
@@ -295,6 +315,10 @@ if __name__ == "__main__":
 
     port = int(
         os.getenv("PORT", "10000")
+    )
+
+    print(
+        f"Starting worker HTTP server on port {port}"
     )
 
     uvicorn.run(
